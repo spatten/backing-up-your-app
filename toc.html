@@ -1,0 +1,348 @@
+<h1>Backing up your app</h1>
+
+
+	<h2>What are we going to back up?</h2>
+
+
+	<ul>
+	<li>data &#8211; your database</li>
+		<li>code &#8211; source control repo</li>
+		<li>user contributed content &#8211; avatars, pics, posts, everything that&#8217;s not in your DB</li>
+		<li>your server configuration</li>
+	</ul>
+
+
+	<h2>General backup principles</h2>
+
+
+	<ul>
+	<li>automate backups</li>
+		<li>test recovery</li>
+		<li>automate recovery</li>
+		<li>save everything.  Prune it later</li>
+		<li>Just do it!</li>
+	</ul>
+
+
+	<h2>Backup options</h2>
+
+
+	<ul>
+	<li>Offsite</li>
+		<li>Be paranoid about losing data, not about people stealing it</li>
+		<li>Price</li>
+		<li>Consider using more than one backup solution.</li>
+	</ul>
+
+
+	<h2>backing up your DB</h2>
+
+
+	<p>This is the most important part</p>
+
+
+	<p>Don&#8217;t be these guys:</p>
+
+
+	<p><img src="file:///Users/spatten/versioned/spattendesign/presentations/backing_up_your_app/journalspace.png" alt="" /></p>
+
+
+	<h3>Solution 1</h3>
+
+
+	<ol>
+	<li>Use EC2OnRails</li>
+		<li>Go have a beer</li>
+	</ol>
+
+
+	<p>http://github.com/pauldowman/ec2onrails</p>
+
+
+	<p>http://pauldowman.com</p>
+
+
+	<h3>Solution 2</h3>
+
+
+	<p>Roll your own (i.e. Borrow Paul&#8217;s backup code).</p>
+
+
+	<p>Here&#8217;s how you do it in MySql.</p>
+
+
+	<h3>Full Backup</h3>
+
+
+	<p>Gives you a snapshot of the database</p>
+
+
+	<p><code>mysqldump</code></p>
+
+
+	<h3>Full invocation</h3>
+
+
+<pre>
+mysqldump --quick --single-transaction --create-options -u&lt;username&gt; --flush-logs --master-data=2 --delete-master-logs \
+  -p'&lt;mysql password&gt;' &lt;database name&gt; | gzip &gt; &lt;dump file&gt;
+</pre>
+
+	<h3>Hmmm.  Think we should automate that command?</h3>
+
+
+	<h3>Script</h3>
+
+
+<pre>
+#!/usr/bin/env ruby
+require "common" 
+begin
+  FileUtils.mkdir_p @temp_dir
+  # assumes the bucket's empty
+  dump_file = "#{@temp_dir}/dump.sql.gz" 
+  cmd = "mysqldump --quick --single-transaction --create-options " +
+  "-u#{@mysql_user} --flush-logs --master-data=2 " +
+  "--delete-master-logs" 
+  cmd += " -p'#{@mysql_password}'" unless @mysql_password.nil?
+  cmd += " #{@mysql_database} | gzip &gt; #{dump_file}" 
+  run(cmd)
+  AWS::S3::S3Object.store(File.basename(dump_file), open(dump_file),@s3_bucket)
+ensure
+  FileUtils.rm_rf(@temp_dir)
+end
+</pre>
+
+	<h3>Incremental backup</h3>
+
+
+	<ul>
+	<li>backing up all of the binary logs</li>
+		<li>flushing the logs you just backed up</li>
+	</ul>
+
+
+	<h3>Binary log setup</h3>
+
+
+	<p>Put this line in <code>my.cnf</code>:</p>
+
+
+	<p><code>log_bin = /var/db/mysql/binlog/mysql-bin</code></p>
+
+
+Give the user <span class="caps">RELOAD</span> and <span class="caps">SUPER</span> privileges:
+<pre>
+GRANT RELOAD ON *.* TO 'user_name'@'%' IDENTIFIED BY 'password';
+GRANT SUPER ON *.* TO 'user_name'@'%' IDENTIFIED BY 'password';
+</pre>
+
+	<h3>Script</h3>
+
+
+<pre>
+#!/usr/bin/env ruby
+require "common" 
+begin
+FileUtils.mkdir_p @temp_dir
+execute_sql "flush logs" 
+logs = Dir.glob("#{@mysql_bin_log_dir}/mysql-bin.[0-9]*").sort
+logs_to_archive = logs[0..-2] # all logs except the last
+logs_to_archive.each do |log|
+# The following executes once for each filename in logs_to_archive
+AWS::S3::S3Object.store(File.basename(log), open(log), @s3_bucket)
+end
+execute_sql "purge master logs to '#{File.basename(logs[-1])}'" 
+ensure
+FileUtils.rm_rf(@temp_dir)
+end
+</pre>
+
+	<h3>Stick it in your cron</h3>
+
+
+Example cron entry:
+<pre>
+# Incremental backup every 10 minutes
+*/10 * * * * root /usr/local/bin/incremental_backup.rb
+# Full backup every day at 05:01
+1 5 * * * root /usr/local/bin/full_backup.rb
+</pre>
+
+	<h3>Pruning your backups</h3>
+
+
+	<p>If you run a lot of backups, then you&#8217;ll end up with a ridiculous number of files.</p>
+
+
+	<p>Prune them every once in a while.</p>
+
+
+	<p>I tend to keep hourly backups for the last month, and daily backups forever.</p>
+
+
+	<h2>Backing up source control</h2>
+
+
+	<h3>Version Control Survey</h3>
+
+
+	<ul>
+	<li>Git</li>
+		<li><span class="caps">SVN</span></li>
+		<li><span class="caps">CVS</span></li>
+		<li>PerForce</li>
+		<li>Mercurial</li>
+	</ul>
+
+
+	<h3>Solution 1</h3>
+
+
+	<ol>
+	<li>Use Github</li>
+		<li>Go have a beer</li>
+	</ol>
+
+
+	<h3>Solution 2</h3>
+
+
+	<p>Back up <span class="caps">SVN</span> to S3</p>
+
+
+	<h3>full and incremental backups</h3>
+
+
+	<p>Full backups give you a complete snapshot of your repository
+They can get very big</p>
+
+
+	<p>Incremental give you a diff of a commit</p>
+
+
+	<p>I tend to run a full backup every 50th commit or so.</p>
+
+
+	<h3>Script</h3>
+
+
+<pre>
+  def create_full_dump
+    puts "Creating full dump for revision #{@rev}" 
+    STDOUT.flush
+    cmd = "/usr/local/bin/svnadmin dump '#{@repos}' --revision " + 
+          "'0:#{@rev}' &gt; #{filename_with_path}" 
+    `#{cmd}`
+    if @zip_full
+      `gzip #{filename_with_path}`
+    end
+  end
+
+  def create_incremental_dump
+    cmd = "/usr/local/bin/svnadmin dump '#{@repos}' --revision " + 
+          "'#{@rev}' --incremental &gt; '#{filename_with_path}'" 
+    `#{cmd}`
+    if @zip_incremental
+      `gzip #{filename_with_path}`
+    end
+  end
+
+  def cleanup
+    File.unlink(filename_with_path(true))
+  end  
+</pre>
+
+	<p>Full script: http://github.com/spatten/backing-up-your-app</p>
+
+
+	<h3>Hook or cron job?</h3>
+
+
+	<h4>Hook</h4>
+
+
+	<p>instant backup
+post-commit hooks can fail</p>
+
+
+	<h4>Cron job</h4>
+
+
+	<p>You aren&#8217;t backed up until the script runs</p>
+
+
+	<p>Either way, make sure the script looks for any missing commits and uploads them too.</p>
+
+
+	<h2>Backing up user contributed content</h2>
+
+
+	<p>Users upload an image, files, something that you are not storing in your DB.</p>
+
+
+	<p>You need to back this up too.</p>
+
+
+	<p>These are typically just files in a directory.</p>
+
+
+	<p>Grab all of the files in those directories and put them on S3.</p>
+
+
+	<h3>s3sync</h3>
+
+
+	<p>http://s3sync.net</p>
+
+
+	<p>Ruby script to back up to an S3 bucket</p>
+
+
+	<p><code>rsync</code> like syntax</p>
+
+
+	<h3><code>sync_multiple_directories.rb</code> from The S3 Cookbook</h3>
+
+
+Create a <span class="caps">YAML</span> file that looks something like this:
+<pre>
+avatars:
+  :directory: /mnt/app/shared/images/avatars
+  :bucket: socialbandwagon_avatars_backup
+
+pictures:
+  :directory: /mnt/app/shared/images/pictures
+  :bucket: socialbandwagon_pictures_backup
+</pre>
+
+	<h3>Run it like this</h3>
+
+
+	<p><code>sync_multiple_directories.rb multi_sync.yml</code></p>
+
+
+	<p>(the code is at <a href="http://github.com/spatten/backing-up-your-app">http://github.com/spatten/backing-up-your-app</a>)</p>
+
+
+	<h3>Stick it in your cron</h3>
+
+
+<pre>
+15 4 * * * /mnt/app/current/script/sync_multiple_directories.rb /mnt/app/current/config/multi_sync.yml _&gt;&gt; \
+/mnt/app/current/log/s3backup.log 2&gt;&#38;1
+</pre>
+
+	<h2>Backing up your computer</h2>
+
+
+	<p>This is becoming less and less needed</p>
+
+
+	<ul>
+	<li>Code on Github</li>
+		<li>Email on Gmail for your domain</li>
+		<li>bookmarks on Delicious / Magnolia</li>
+		<li>pictures on Flickr</li>
+		<li>music from emusic</li>
+	</ul>
