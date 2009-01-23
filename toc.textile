@@ -129,6 +129,14 @@ Example cron entry:
 1 5 * * * root /usr/local/bin/full_backup.rb
 </pre>
 
+h3. Pruning your backups
+
+If you run a lot of backups, then you'll end up with a ridiculous number of files.
+
+Prune them every once in a while.
+
+I tend to keep hourly backups for the last month, and daily backups forever.
+
 h2. Backing up source control
 
 h3. Version Control Survey
@@ -147,6 +155,15 @@ h3. Solution 1
 h3. Solution 2
 
 Back up SVN to S3
+
+h3. full and incremental backups
+
+Full backups give you a complete snapshot of your repository
+They can get very big
+
+Incremental give you a diff of a commit
+
+I tend to run a full backup every 50th commit or so.
 
 h3. Script
 
@@ -176,17 +193,71 @@ h3. Script
   end  
 </pre>
 
-Full script: http://github.com/spatten/backing_up_your_app_presentation
+Full script: http://github.com/spatten/backing-up-your-app
 
 h3. Hook or cron job?
 
-You can run this as a post-commit hook.
+h4. Hook
 
-Here's a script:
+instant backup
+post-commit hooks can fail
 
-Here's how it works
+h4. Cron job
 
-Two types of backups: full and incremental
+You aren't backed up until the script runs
 
-run a full backup every 50 commits or so.
+Either way, make sure the script looks for any missing commits and uploads them too.
 
+h2. Backing up user contributed content
+
+Users upload an image, files, something that you are not storing in your DB.
+
+You need to back this up too.
+
+These are typically just files in a directory.  
+
+Grab all of the files in those directories and put them on S3.
+
+h3. s3sync
+
+http://s3sync.net
+
+Ruby script to back up to an S3 bucket
+
+@rsync@ like syntax
+
+h3. @sync_multiple_directories.rb@ from The S3 Cookbook
+
+Create a YAML file that looks something like this:
+<pre>
+avatars:
+  :directory: /mnt/app/shared/images/avatars
+  :bucket: socialbandwagon_avatars_backup
+  
+pictures:
+  :directory: /mnt/app/shared/images/pictures
+  :bucket: socialbandwagon_pictures_backup
+</pre>
+
+h3. Run it like this
+
+@sync_multiple_directories.rb multi_sync.yml@
+
+(the code is at "http://github.com/spatten/backing-up-your-app":http://github.com/spatten/backing-up-your-app)
+
+h3. Stick it in your cron
+
+<pre>
+15 4 * * * /mnt/app/current/script/sync_multiple_directories.rb /mnt/app/current/config/multi_sync.yml _>> \
+/mnt/app/current/log/s3backup.log 2>&1
+</pre>
+
+h2. Backing up your computer
+
+This is becoming less and less needed
+
+* Code on Github
+* Email on Gmail for your domain
+* bookmarks on Delicious / Magnolia
+* pictures on Flickr
+* music from emusic
