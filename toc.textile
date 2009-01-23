@@ -1,0 +1,192 @@
+h1. Backing up your app
+
+h2. What are we going to back up?
+
+* data - your database
+* code - source control repo
+* user contributed content - avatars, pics, posts, everything that's not in your DB
+* your server configuration
+
+h2. General backup principles
+
+* automate backups
+* test recovery
+* automate recovery
+* save everything.  Prune it later
+* Just do it!
+
+h2. Backup options
+
+* Offsite
+* Be paranoid about losing data, not about people stealing it
+* Price
+* Consider using more than one backup solution.
+
+h2. backing up your DB
+
+This is the most important part
+
+Don't be these guys: 
+
+!file:///Users/spatten/versioned/spattendesign/presentations/backing_up_your_app/journalspace.png!
+
+h3. Solution 1
+
+# Use EC2OnRails
+# Go have a beer
+
+http://github.com/pauldowman/ec2onrails
+
+http://pauldowman.com
+
+h3. Solution 2
+
+Roll your own (i.e. Borrow Paul's backup code).
+
+Here's how you do it in MySql.
+
+h3. Full Backup
+
+Gives you a snapshot of the database
+
+@mysqldump@
+
+h3. Full invocation
+
+<pre>
+mysqldump --quick --single-transaction --create-options -u<username> --flush-logs --master-data=2 --delete-master-logs \
+  -p'<mysql password>' <database name> | gzip > <dump file>
+</pre>
+    
+h3. Hmmm.  Think we should automate that command?
+
+h3. Script
+
+<pre>
+#!/usr/bin/env ruby
+require "common"
+begin
+  FileUtils.mkdir_p @temp_dir
+  # assumes the bucket's empty
+  dump_file = "#{@temp_dir}/dump.sql.gz"
+  cmd = "mysqldump --quick --single-transaction --create-options " +
+  "-u#{@mysql_user} --flush-logs --master-data=2 " +
+  "--delete-master-logs"
+  cmd += " -p'#{@mysql_password}'" unless @mysql_password.nil?
+  cmd += " #{@mysql_database} | gzip > #{dump_file}"
+  run(cmd)
+  AWS::S3::S3Object.store(File.basename(dump_file), open(dump_file),@s3_bucket)
+ensure
+  FileUtils.rm_rf(@temp_dir)
+end
+</pre>
+
+h3. Incremental backup
+
+* backing up all of the binary logs
+* flushing the logs you just backed up
+
+h3. Binary log setup
+
+Put this line in @my.cnf@:
+
+@log_bin = /var/db/mysql/binlog/mysql-bin@
+
+Give the user RELOAD and SUPER privileges:
+<pre>
+GRANT RELOAD ON *.* TO 'user_name'@'%' IDENTIFIED BY 'password';
+GRANT SUPER ON *.* TO 'user_name'@'%' IDENTIFIED BY 'password';
+</pre>
+
+h3. Script
+
+<pre>
+#!/usr/bin/env ruby
+require "common"
+begin
+FileUtils.mkdir_p @temp_dir
+execute_sql "flush logs"
+logs = Dir.glob("#{@mysql_bin_log_dir}/mysql-bin.[0-9]*").sort
+logs_to_archive = logs[0..-2] # all logs except the last
+logs_to_archive.each do |log|
+# The following executes once for each filename in logs_to_archive
+AWS::S3::S3Object.store(File.basename(log), open(log), @s3_bucket)
+end
+execute_sql "purge master logs to '#{File.basename(logs[-1])}'"
+ensure
+FileUtils.rm_rf(@temp_dir)
+end
+</pre>
+
+
+h3. Stick it in your cron
+
+Example cron entry:
+<pre>
+# Incremental backup every 10 minutes
+*/10 * * * * root /usr/local/bin/incremental_backup.rb
+# Full backup every day at 05:01
+1 5 * * * root /usr/local/bin/full_backup.rb
+</pre>
+
+h2. Backing up source control
+
+h3. Version Control Survey
+
+* Git
+* SVN
+* CVS
+* PerForce
+* Mercurial
+
+h3. Solution 1
+
+# Use Github
+# Go have a beer
+
+h3. Solution 2
+
+Back up SVN to S3
+
+h3. Script
+
+<pre>
+  def create_full_dump
+    puts "Creating full dump for revision #{@rev}"
+    STDOUT.flush
+    cmd = "/usr/local/bin/svnadmin dump '#{@repos}' --revision " + 
+          "'0:#{@rev}' > #{filename_with_path}"
+    `#{cmd}`
+    if @zip_full
+      `gzip #{filename_with_path}`
+    end
+  end
+  
+  def create_incremental_dump
+    cmd = "/usr/local/bin/svnadmin dump '#{@repos}' --revision " + 
+          "'#{@rev}' --incremental > '#{filename_with_path}'"
+    `#{cmd}`
+    if @zip_incremental
+      `gzip #{filename_with_path}`
+    end
+  end
+  
+  def cleanup
+    File.unlink(filename_with_path(true))
+  end  
+</pre>
+
+Full script: http://github.com/spatten/backing_up_your_app_presentation
+
+h3. Hook or cron job?
+
+You can run this as a post-commit hook.
+
+Here's a script:
+
+Here's how it works
+
+Two types of backups: full and incremental
+
+run a full backup every 50 commits or so.
+
