@@ -22,6 +22,36 @@ h2. Backup options
 * Price
 * Consider using more than one backup solution.
 
+h2. Amazon S3
+
+@sudo gem install aws-s3@
+
+h2. Amazon S3
+
+set up two environment variables,
+@AMAZON_ACCESS_KEY_ID@ and @AMAZON_SECRET_ACCESS_KEY@
+
+h2. Amazon S3
+
+<pre>
+#!/usr/bin/env ruby
+
+require 'rubygems'
+require 'aws/s3'
+include AWS::S3
+
+AWS::S3::Base.establish_connection!(
+    :access_key_id     => ENV['AMAZON_ACCESS_KEY_ID'],
+    :secret_access_key => ENV['AMAZON_SECRET_ACCESS_KEY']
+)
+
+bucket = ARGV[0]
+file = ARGV[1]
+
+Bucket.create(bucket)
+S3Object.store(file, File.open(file), bucket)
+</pre>
+
 h2. backing up your DB
 
 This is the most important part
@@ -104,17 +134,17 @@ h3. Script
 #!/usr/bin/env ruby
 require "common"
 begin
-FileUtils.mkdir_p @temp_dir
-execute_sql "flush logs"
-logs = Dir.glob("#{@mysql_bin_log_dir}/mysql-bin.[0-9]*").sort
-logs_to_archive = logs[0..-2] # all logs except the last
-logs_to_archive.each do |log|
-# The following executes once for each filename in logs_to_archive
-AWS::S3::S3Object.store(File.basename(log), open(log), @s3_bucket)
-end
-execute_sql "purge master logs to '#{File.basename(logs[-1])}'"
+  FileUtils.mkdir_p @temp_dir
+  execute_sql "flush logs"
+  logs = Dir.glob("#{@mysql_bin_log_dir}/mysql-bin.[0-9]*").sort
+  logs_to_archive = logs[0..-2] # all logs except the last
+  logs_to_archive.each do |log|
+  # The following executes once for each filename in logs_to_archive
+  AWS::S3::S3Object.store(File.basename(log), open(log), @s3_bucket)
+  end
+  execute_sql "purge master logs to '#{File.basename(logs[-1])}'"
 ensure
-FileUtils.rm_rf(@temp_dir)
+  FileUtils.rm_rf(@temp_dir)
 end
 </pre>
 
@@ -252,12 +282,26 @@ h3. Stick it in your cron
 /mnt/app/current/log/s3backup.log 2>&1
 </pre>
 
-h2. Backing up your computer
+h2. Backing up your server configuration
 
-This is becoming less and less needed
+How many people do this?
 
-* Code on Github
-* Email on Gmail for your domain
-* bookmarks on Delicious / Magnolia
-* pictures on Flickr
-* music from emusic
+How long would it take you to set up a server from scratch?
+
+For me, even with ec2onrails, it's about 1.5 hours, start to finish, if everything goes perfectly.
+
+Probably about three if I was going "Oh god.  The site is down!" the whole time.
+
+h2. Creating an AMI on EC2
+
+http://docs.amazonwebservices.com/AWSEC2/2007-08-29/GettingStartedGuide/creating-an-image.html
+
+# Create an image (AMI) - This creates a snapshot of your server.  You can specify what directories to ignore.
+# upload it to S3 - pick a bucket and upload the snapshot to S3
+# Register the AMI - Once you register it, you can create a new EC2 instance that is an exact copy of the snapshot
+
+VMWare or Xen will do the same thing for you
+
+h2.
+
+Thanks
